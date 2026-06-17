@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Shop Product Image Generator</title>
+  <link rel="stylesheet" href="/client/css/plugin-base.css">
+  <link rel="stylesheet" href="/client/plugins/shopProductImage/style.css">
+</head>
+<body>
+
+  <div class="view-tabs">
+    <button class="view-tab active" data-view="tool">Tool</button>
+    <button class="view-tab" data-view="gallery">Gallery</button>
+  </div>
+
+  <!-- ── Tool view ────────────────────────────────────────────── -->
+  <div class="view active" id="view-tool">
+
+    <div id="tool-scroll">
+
+      <!-- Source queue -->
+      <div id="queue-area">
+        <div id="queue-header">
+          <span id="queue-count">0 images queued</span>
+        </div>
+        <div id="queue-strip">
+          <div id="queue-hint">Drag raw images from the sidebar, or use the + button to open a new job</div>
+        </div>
+      </div>
+
+      <!-- Magnifier parameters -->
+      <section class="render-section">
+        <div class="section-title"><span class="section-bar"></span>Magnifier parameters</div>
+        <div class="render-grid">
+          <label class="render-field">
+            <span>Mag points</span>
+            <input type="number" id="f-numPoints" min="1" value="4">
+          </label>
+          <label class="render-field">
+            <span>Zoom factor</span>
+            <input type="number" id="f-circleZoomFactor" min="1" value="6">
+          </label>
+          <label class="render-field">
+            <span>Border width</span>
+            <input type="number" id="f-circleBorderWidth" min="0" value="3">
+          </label>
+          <label class="render-field">
+            <span>Badge Ø</span>
+            <input type="number" id="f-badgeDiameter" min="1" value="35">
+          </label>
+          <label class="render-field">
+            <span>Cutout Ø</span>
+            <input type="number" id="f-badgeDiameterCutouts" min="1" value="80">
+          </label>
+          <label class="render-field">
+            <span>Seed <em>optional</em></span>
+            <input type="number" id="f-seed" placeholder="Random">
+          </label>
+        </div>
+      </section>
+
+      <!-- Colors -->
+      <section class="render-section">
+        <div class="section-title"><span class="section-bar"></span>Colors</div>
+        <div class="color-rows">
+          <div class="color-row">
+            <span class="color-label">Circle border</span>
+            <div class="color-pick">
+              <input type="color" id="col-border-pick" value="#1e1e1e">
+              <input type="text"  id="col-border-hex" value="#1e1e1eff" maxlength="9" spellcheck="false">
+            </div>
+          </div>
+          <div class="color-row">
+            <span class="color-label">Badge fill</span>
+            <div class="color-pick">
+              <input type="color" id="col-fill-pick" value="#1e1e1e">
+              <input type="text"  id="col-fill-hex" value="#1e1e1eff" maxlength="9" spellcheck="false">
+            </div>
+          </div>
+          <div class="color-row">
+            <span class="color-label">Badge text</span>
+            <div class="color-pick">
+              <input type="color" id="col-text-pick" value="#ffffff">
+              <input type="text"  id="col-text-hex" value="#ffffffff" maxlength="9" spellcheck="false">
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Result (single-image mode only) -->
+      <section class="render-section" id="result-section" style="display:none">
+        <div class="section-title"><span class="section-bar"></span>Last result</div>
+        <img id="result-img" alt="Generated output">
+      </section>
+
+    </div><!-- /tool-scroll -->
+
+    <!-- Action bar -->
+    <div class="settings-bar" id="action-bar">
+      <div id="progress-wrap" style="display:none">
+        <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+        <span id="progress-label"></span>
+      </div>
+      <div class="bar-actions">
+        <span class="bar-status" id="status"></span>
+        <button class="btn btn-ghost"   id="btn-save">Save</button>
+        <button class="btn btn-primary" id="btn-generate">Generate</button>
+      </div>
+    </div>
+
+  </div><!-- /view-tool -->
+
+  <!-- ── Gallery view ──────────────────────────────────────────── -->
+  <div class="view" id="view-gallery">
+    <div id="gallery-container"></div>
+  </div>
+
+  <script type="module">
+    import { Gallery } from '/client/dist/gallery.js';
+
+    const PLUGIN = 'shopProductImage';
+    let jobId        = null;
+    let queue        = []; // { uuid, url, label }[]
+    let lastOutputUuid = null;
+    let isDirty      = false;
+    let isGenerating = false;
+
+    const statusEl      = document.getElementById('status');
+    const progressWrap  = document.getElementById('progress-wrap');
+    const progressFill  = document.getElementById('progress-fill');
+    const progressLabel = document.getElementById('progress-label');
+    const resultSection = document.getElementById('result-section');
+    const resultImg     = document.getElementById('result-img');
+    const generateBtn   = document.getElementById('btn-generate');
+    const queueStrip    = document.getElementById('queue-strip');
+    const queueCountEl  = document.getElementById('queue-count');
+    const queueHint     = document.getElementById('queue-hint');
+
+    // Gallery
+    const gallery = new Gallery(document.getElementById('gallery-container'), PLUGIN, {
+      onItemActivate: loadFromGenerated,
+      onDelete: deleteGeneratedItems,
+    });
+
+    // Delete generated output(s); shows modal with connected raw images + jobs
+    async function deleteGeneratedItems(items) {
+      const { showDeleteModal } = await import('/client/dist/delete-modal.js');
+
+      const planItems       = new Map();
+      const jobDataCache    = new Map(); // jobId → job object
+      const selectedOutIds  = new Set(items.map(i => i.uuid)); // explicitly selected
+
+      for (const item of items) {
+        const outId = `output:${item.uuid}`;
+        planItems.set(outId, {
+          id: outId,
+          type: 'Output Image',
+          label: item.filename ?? item.uuid.slice(0, 8),
+          imageUrl: item.thumbnail ?? item.url,
+          checked: true,
+          onDelete: () => fetch(`/api/settings/${PLUGIN}/${item.uuid}`, { method: 'DELETE' }).catch(() => {}),
+        });
+
+        // Discover connected raw image + job
+        const entry = await fetch(`/api/settings/${PLUGIN}/${item.uuid}`).then(r => r.json()).catch(() => null);
+        if (!entry?.settings) continue;
+        const { activeUuid, activeUrl, jobId } = entry.settings;
+
+        if (activeUuid && !planItems.has(`raw:${activeUuid}`)) {
+          planItems.set(`raw:${activeUuid}`, {
+            id: `raw:${activeUuid}`,
+            type: 'Raw Image',
+            label: activeUrl?.split('/').pop() ?? activeUuid.slice(0, 8),
+            imageUrl: activeUrl,
+            checked: false,
+            onDelete: () => fetch(`/api/images/raw/${activeUuid}`, { method: 'DELETE' }).catch(() => {}),
+          });
+        }
+
+        if (jobId && !jobDataCache.has(jobId)) {
+          const job = await fetch(`/api/jobs/${jobId}`).then(r => r.json()).catch(() => null);
+          if (job) jobDataCache.set(jobId, job);
+        }
+
+        if (jobId && !planItems.has(`job:${jobId}`)) {
+          const job = jobDataCache.get(jobId);
+          const rawCount  = Array.isArray(job?.rawImage) ? job.rawImage.length : 0;
+          const jobOutputs = Array.isArray(job?.outputs) ? job.outputs : [];
+
+          // Show other outputs of the same job; auto-check ones also selected
+          for (const outputId of jobOutputs) {
+            const otherId = `output:${outputId}`;
+            if (!planItems.has(otherId)) {
+              planItems.set(otherId, {
+                id: otherId,
+                type: 'Output Image',
+                label: outputId.slice(0, 8),
+                imageUrl: `/api/images/${PLUGIN}/${outputId}`,
+                checked: selectedOutIds.has(outputId),
+                onDelete: () => fetch(`/api/settings/${PLUGIN}/${outputId}`, { method: 'DELETE' }).catch(() => {}),
+              });
+            }
+          }
+
+          // Auto-check the job when ALL its known outputs are being deleted
+          const allOutputsSelected = jobOutputs.length > 0 && jobOutputs.every(id => selectedOutIds.has(id));
+
+          planItems.set(`job:${jobId}`, {
+            id: `job:${jobId}`,
+            type: 'Job',
+            label: `Job ${jobId.slice(0, 8)}`,
+            meta: rawCount > 0 ? `rawImage (${rawCount} image${rawCount !== 1 ? 's' : ''})` : undefined,
+            checked: allOutputsSelected,
+            onDelete: () => fetch(`/api/jobs/${jobId}`, { method: 'DELETE' }).catch(() => {}),
+          });
+        }
+      }
+
+      const n = items.length;
+      const deletedIds = await showDeleteModal({
+        title: n === 1 ? 'Delete Generated Image' : `Delete ${n} Generated Images`,
+        items: [...planItems.values()],
+      });
+
+      // Return only the output UUIDs so the gallery can remove those cards
+      return deletedIds
+        .filter(id => id.startsWith('output:'))
+        .map(id => id.slice('output:'.length));
+    }
+
+    // ── View tabs ──────────────────────────────────────────────
+    document.querySelectorAll('.view-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        const v = tab.dataset.view;
+        document.querySelectorAll('.view-tab').forEach(t => t.classList.toggle('active', t.dataset.view === v));
+        document.querySelectorAll('.view').forEach(el => el.classList.toggle('active', el.id === `view-${v}`));
+        if (v === 'gallery') gallery.refresh();
+      });
+    });
+
+    // ── Color pickers ──────────────────────────────────────────
+    function pickerToRgba(picker, alpha = 'ff') {
+      const v = picker.value.replace('#', '').trim();
+      const base = v.length === 3 ? v.split('').map(c => c + c).join('') : v.slice(0, 6);
+      return `#${base}${alpha}`;
+    }
+    function syncHexFromPicker(picker, hexInput) {
+      const cur = hexInput.value.replace('#', '').trim();
+      const alpha = cur.length === 8 ? cur.slice(6, 8) : 'ff';
+      hexInput.value = pickerToRgba(picker, alpha);
+    }
+    function syncPickerFromHex(picker, hexInput) {
+      const h = hexInput.value.replace('#', '').trim();
+      if (h.length >= 6) picker.value = `#${h.slice(0, 2)}${h.slice(2, 4)}${h.slice(4, 6)}`;
+    }
+
+    const colorPairs = [
+      [document.getElementById('col-border-pick'), document.getElementById('col-border-hex')],
+      [document.getElementById('col-fill-pick'),   document.getElementById('col-fill-hex')],
+      [document.getElementById('col-text-pick'),   document.getElementById('col-text-hex')],
+    ];
+    colorPairs.forEach(([picker, hex]) => {
+      picker.addEventListener('input',  () => { syncHexFromPicker(picker, hex); markDirty(true); });
+      hex.addEventListener('change',    () => { syncPickerFromHex(picker, hex); markDirty(true); });
+    });
+
+    ['f-numPoints','f-circleZoomFactor','f-circleBorderWidth','f-badgeDiameter','f-badgeDiameterCutouts','f-seed']
+      .forEach(id => document.getElementById(id).addEventListener('change', () => markDirty(true)));
+
+    // ── Queue management ───────────────────────────────────────
+    function addToQueue(item) {
+      if (!item?.url) return;
+      if (queue.some(q => q.url === item.url)) return; // deduplicate
+      queue.push({ uuid: item.uuid ?? '', url: item.url, label: item.label ?? item.uuid?.slice(0,8) ?? '' });
+      renderQueue();
+      markDirty(true);
+    }
+
+    function removeFromQueue(url) {
+      queue = queue.filter(q => q.url !== url);
+      renderQueue();
+      markDirty(true);
+    }
+
+    function renderQueue() {
+      // Remove existing thumbnails (keep hint)
+      queueStrip.querySelectorAll('.queue-item').forEach(el => el.remove());
+
+      queue.forEach(item => {
+        const el  = document.createElement('div');
+        el.className = 'queue-item';
+        const img = document.createElement('img');
+        img.src   = item.url;
+        img.alt   = item.label;
+        const rm  = document.createElement('button');
+        rm.className = 'queue-remove';
+        rm.textContent = '×';
+        rm.title = 'Remove';
+        rm.addEventListener('click', () => removeFromQueue(item.url));
+        el.append(img, rm);
+        queueStrip.appendChild(el);
+      });
+
+      queueHint.style.display   = queue.length ? 'none' : '';
+      queueCountEl.textContent  = queue.length
+        ? `${queue.length} image${queue.length !== 1 ? 's' : ''} queued`
+        : '0 images queued';
+    }
+
+    // ── postMessage protocol ───────────────────────────────────
+    window.addEventListener('message', async e => {
+      const msg = e.data ?? {};
+      switch (msg.type) {
+        case 'init':
+          jobId = msg.jobId;
+          queue = [];
+          if (msg.item) addToQueue(msg.item);
+          await loadSettings();
+          break;
+        case 'load-job':
+          jobId = msg.jobId;
+          queue = [];
+          await loadSettings();
+          renderQueue();
+          break;
+        case 'add-item':
+          addToQueue(msg.item);
+          break;
+        case 'add-generated-item':
+          await loadFromGeneratedByUuid(msg.uuid);
+          break;
+        case 'request-save':
+          await doSave();
+          window.parent.postMessage({ type: 'saved', jobId }, '*');
+          break;
+        case 'refresh-gallery':
+          gallery.refresh();
+          break;
+      }
+    });
+
+    window.parent.postMessage({ type: 'ready' }, '*');
+
+    // ── Collect / apply settings ───────────────────────────────
+    function val(id)    { return document.getElementById(id).value; }
+    function numVal(id) { const v = val(id); return v === '' ? null : Number(v); }
+
+    function collectSettings() {
+      return {
+        numPoints:            numVal('f-numPoints'),
+        circleZoomFactor:     numVal('f-circleZoomFactor'),
+        circleBorderWidth:    numVal('f-circleBorderWidth'),
+        badgeDiameter:        numVal('f-badgeDiameter'),
+        badgeDiameterCutouts: numVal('f-badgeDiameterCutouts'),
+        seed:                 val('f-seed'),
+        circleBorderColor:    document.getElementById('col-border-hex').value,
+        badgeFillColor:       document.getElementById('col-fill-hex').value,
+        badgeTextColor:       document.getElementById('col-text-hex').value,
+        queueItems:           queue,
+        lastOutputUuid,
+      };
+    }
+
+    function set(id, v) { if (v != null) document.getElementById(id).value = v; }
+
+    function applySettings(s) {
+      set('f-numPoints',            s.numPoints);
+      set('f-circleZoomFactor',     s.circleZoomFactor);
+      set('f-circleBorderWidth',    s.circleBorderWidth);
+      set('f-badgeDiameter',        s.badgeDiameter);
+      set('f-badgeDiameterCutouts', s.badgeDiameterCutouts);
+      set('f-seed',                 s.seed ?? '');
+
+      if (s.circleBorderColor) {
+        document.getElementById('col-border-hex').value = s.circleBorderColor;
+        syncPickerFromHex(document.getElementById('col-border-pick'), document.getElementById('col-border-hex'));
+      }
+      if (s.badgeFillColor) {
+        document.getElementById('col-fill-hex').value = s.badgeFillColor;
+        syncPickerFromHex(document.getElementById('col-fill-pick'), document.getElementById('col-fill-hex'));
+      }
+      if (s.badgeTextColor) {
+        document.getElementById('col-text-hex').value = s.badgeTextColor;
+        syncPickerFromHex(document.getElementById('col-text-pick'), document.getElementById('col-text-hex'));
+      }
+
+      // Restore queue
+      if (Array.isArray(s.queueItems) && s.queueItems.length) {
+        queue = s.queueItems;
+      } else if (s.activeUrl) {
+        // Backward compat: old single-image format
+        queue = [{ uuid: s.activeUuid ?? '', url: s.activeUrl, label: (s.activeUuid ?? '').slice(0, 8) }];
+      }
+      renderQueue();
+
+      if (s.lastOutputUuid) {
+        lastOutputUuid = s.lastOutputUuid;
+        showResult(`/api/images/${PLUGIN}/${s.lastOutputUuid}`);
+      }
+    }
+
+    function markDirty(dirty) {
+      isDirty = dirty;
+      window.parent.postMessage({ type: 'dirty-state', dirty }, '*');
+    }
+
+    function setStatus(msg, duration = 3000) {
+      statusEl.textContent = msg;
+      if (duration > 0) setTimeout(() => { statusEl.textContent = ''; }, duration);
+    }
+
+    // ── Settings API ───────────────────────────────────────────
+    async function doSave() {
+      if (!jobId) return;
+      try {
+        await fetch('/api/plugins/settings/set', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ jobId, plugin: PLUGIN, settings: collectSettings() }),
+        });
+        markDirty(false);
+      } catch {
+        setStatus('Save failed.');
+      }
+    }
+
+    async function loadSettings() {
+      if (!jobId) return;
+      try {
+        const res  = await fetch(`/api/plugins/settings/get?jobId=${jobId}&plugin=${PLUGIN}`);
+        const data = await res.json();
+        if (data && Object.keys(data).length) applySettings(data);
+        markDirty(false);
+      } catch {
+        setStatus('Could not load settings.');
+      }
+    }
+
+    // ── Result display ─────────────────────────────────────────
+    function showResult(url) {
+      resultImg.src = `${url}?t=${Date.now()}`;
+      resultSection.style.display = '';
+    }
+
+    // ── Progress ───────────────────────────────────────────────
+    function showProgress(pct, label) {
+      progressWrap.style.display = '';
+      progressFill.style.width   = `${pct}%`;
+      progressLabel.textContent  = `${pct}% — ${label}`;
+    }
+    function hideProgress() {
+      progressWrap.style.display = 'none';
+      progressFill.style.width   = '0%';
+    }
+
+    // ── Load from generated ────────────────────────────────────
+    async function loadFromGeneratedByUuid(uuid) {
+      try {
+        const entry = await fetch(`/api/settings/${PLUGIN}/${uuid}`).then(r => r.json());
+        if (!entry?.settings) { setStatus('No settings found.'); return; }
+        const s = entry.settings;
+        set('f-numPoints',            s.numPoints);
+        set('f-circleZoomFactor',     s.circleZoomFactor);
+        set('f-circleBorderWidth',    s.circleBorderWidth);
+        set('f-badgeDiameter',        s.badgeDiameter);
+        set('f-badgeDiameterCutouts', s.badgeDiameterCutouts);
+        set('f-seed',                 s.seed ?? '');
+        if (s.circleBorderColor) {
+          document.getElementById('col-border-hex').value = s.circleBorderColor;
+          syncPickerFromHex(document.getElementById('col-border-pick'), document.getElementById('col-border-hex'));
+        }
+        if (s.badgeFillColor) {
+          document.getElementById('col-fill-hex').value = s.badgeFillColor;
+          syncPickerFromHex(document.getElementById('col-fill-pick'), document.getElementById('col-fill-hex'));
+        }
+        if (s.badgeTextColor) {
+          document.getElementById('col-text-hex').value = s.badgeTextColor;
+          syncPickerFromHex(document.getElementById('col-text-pick'), document.getElementById('col-text-hex'));
+        }
+        // Replace the queue with the original raw source (not the generated output)
+        queue = [];
+        if (s.activeUrl) addToQueue({ uuid: s.activeUuid ?? '', url: s.activeUrl, label: (s.activeUuid ?? '').slice(0,8) });
+        // Show the generated output as the last result
+        lastOutputUuid = uuid;
+        showResult(`/api/images/${PLUGIN}/${uuid}`);
+        switchToToolView();
+        setStatus('Settings loaded ✓');
+        markDirty(true);
+      } catch {
+        setStatus('Could not load settings.');
+      }
+    }
+
+    async function loadFromGenerated(item) {
+      await loadFromGeneratedByUuid(item.uuid);
+    }
+
+    // ── Stream NDJSON from one generate call ───────────────────
+    async function streamGenerate(body, labelPrefix) {
+      const res = await fetch('/api/shopProductImage/generate', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message ?? `HTTP ${res.status}`);
+      }
+      const reader  = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let result = null;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          let p;
+          try { p = JSON.parse(line); } catch { continue; }
+          if (p.current != null && p.total > 0) {
+            const pct   = Math.round((p.current / p.total) * 100);
+            const stage = p.pipelineStage === 'magnifyers' ? 'Adding magnifiers…' : 'Blender rendering…';
+            showProgress(pct, `${labelPrefix}${stage}`);
+          }
+          if (p.stage === 'error') throw new Error(p.message || 'Generation failed');
+          if (p.outputUrl) result = p;
+        }
+      }
+      return result;
+    }
+
+    // ── Generate (batch) ───────────────────────────────────────
+    async function doGenerate() {
+      if (!jobId)        { setStatus('No job active.'); return; }
+      if (!queue.length) { setStatus('No images in queue.'); return; }
+      if (isGenerating)  return;
+
+      isGenerating = true;
+      generateBtn.disabled    = true;
+      generateBtn.textContent = 'Generating…';
+      await doSave();
+
+      const s = collectSettings();
+      const params = {
+        jobId,
+        numPoints:            s.numPoints,
+        circleZoomFactor:     s.circleZoomFactor,
+        circleBorderWidth:    s.circleBorderWidth,
+        badgeDiameter:        s.badgeDiameter,
+        badgeDiameterCutouts: s.badgeDiameterCutouts,
+        circleBorderColor:    s.circleBorderColor,
+        badgeFillColor:       s.badgeFillColor,
+        badgeTextColor:       s.badgeTextColor,
+        seed:                 s.seed,
+      };
+
+      const isSingle = queue.length === 1;
+      let successCount = 0;
+      showProgress(0, 'Starting…');
+      setStatus('', 0);
+
+      for (let i = 0; i < queue.length; i++) {
+        const item   = queue[i];
+        const prefix = queue.length > 1 ? `${i + 1}/${queue.length}: ` : '';
+        try {
+          const result = await streamGenerate({
+            ...params,
+            rawImageUrl:        item.url,
+            existingOutputUuid: isSingle ? (lastOutputUuid ?? undefined) : undefined,
+          }, prefix);
+
+          if (result?.outputUrl) {
+            successCount++;
+            if (isSingle) {
+              lastOutputUuid = result.uuid;
+              showResult(result.outputUrl);
+            }
+          }
+        } catch (err) {
+          setStatus(`${prefix}Error: ${(err.message ?? '').slice(0, 80)}`, 5000);
+        }
+      }
+
+      if (isSingle && successCount === 1) {
+        showProgress(100, 'Done!');
+        setStatus('Generated ✓');
+        setTimeout(hideProgress, 2000);
+      } else {
+        hideProgress();
+        setStatus(`Done: ${successCount} / ${queue.length} generated`);
+      }
+
+      await doSave();
+      markDirty(false);
+      window.parent.postMessage({ type: 'gallery-changed' }, '*');
+      isGenerating            = false;
+      generateBtn.disabled    = false;
+      generateBtn.textContent = 'Generate';
+    }
+
+    // ── View helpers ───────────────────────────────────────────
+    function switchToToolView() {
+      document.querySelectorAll('.view-tab').forEach(t => t.classList.toggle('active', t.dataset.view === 'tool'));
+      document.querySelectorAll('.view').forEach(el => el.classList.toggle('active', el.id === 'view-tool'));
+    }
+
+    // ── Gallery drag → Tool queue ──────────────────────────────
+    // Hovering a gallery card over the Tool tab while dragging switches the view
+    document.querySelector('.view-tab[data-view="tool"]').addEventListener('dragover', e => {
+      if (!e.dataTransfer.types.includes('text/x-gallery-uuid')) return;
+      e.preventDefault();
+      switchToToolView();
+    });
+    // Tool view accepts gallery card drops
+    const viewToolEl = document.getElementById('view-tool');
+    viewToolEl.addEventListener('dragover', e => {
+      if (!e.dataTransfer.types.includes('text/x-gallery-uuid')) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    });
+    viewToolEl.addEventListener('drop', async e => {
+      const uuid = e.dataTransfer.getData('text/x-gallery-uuid');
+      if (!uuid) return;
+      e.preventDefault();
+      await loadFromGeneratedByUuid(uuid);
+    });
+
+    // ── Button wiring ──────────────────────────────────────────
+    document.getElementById('btn-save').addEventListener('click', async () => {
+      await doSave();
+      window.parent.postMessage({ type: 'saved', jobId }, '*');
+      setStatus('Saved ✓');
+    });
+    generateBtn.addEventListener('click', doGenerate);
+  </script>
+
+</body>
+</html>

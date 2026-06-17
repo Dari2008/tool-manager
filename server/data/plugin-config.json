@@ -1,0 +1,12 @@
+{
+  "shopProductImage": {
+    "enabled": true,
+    "globalSettings": {
+      "blenderPath": "C:\\Program Files\\Blender Foundation\\Blender 4.5\\blender.exe",
+      "blendFile": "C:\\Users\\dariu\\Desktop\\Auftraege\\RenderTool\\FloRenderingProduct.blend",
+      "pythonPath": ".\\.venv\\Scripts\\python.exe",
+      "materialName": "Image",
+      "nodeName": "Image"
+    }
+  }
+}

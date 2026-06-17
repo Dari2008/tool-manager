@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ToolManager</title>
+  <link rel="stylesheet" href="/client/css/style.css">
+  <link rel="stylesheet" href="/client/css/workflow.css">
+</head>
+<body>
+
+  <!-- ─── Top tab bar ──────────────────────────────────────── -->
+  <header id="tab-bar">
+    <div id="tabs"></div>
+    <div id="tab-right">
+      <button id="tab-plugins" class="tab plugins-tab">Plugins</button>
+      <button id="btn-plugin-settings" class="icon-btn" title="Settings for active plugin" style="display:none">⚙</button>
+    </div>
+  </header>
+
+  <!-- ─── Job sub-tabs ─────────────────────────────────────── -->
+  <div id="job-tab-bar" style="display:none">
+    <div id="job-tabs"></div>
+    <button id="btn-new-job" class="job-new-btn" title="New job">＋</button>
+  </div>
+
+  <!-- ─── Main layout ──────────────────────────────────────── -->
+  <div id="layout">
+
+    <aside id="sidebar">
+      <div id="sidebar-header">
+        <span id="sidebar-title">Items</span>
+        <button id="btn-refresh" class="icon-btn" title="Refresh">↻</button>
+      </div>
+      <div id="item-list">
+        <div class="placeholder">Select a plugin</div>
+      </div>
+    </aside>
+
+    <main id="tool-area">
+
+      <!-- Plugin iframe -->
+      <div id="iframe-wrap">
+        <iframe
+          id="tool-frame"
+          src="about:blank"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-modals"
+          allow="clipboard-read; clipboard-write"
+        ></iframe>
+        <div id="iframe-overlay"></div>
+      </div>
+
+      <!-- Plugins panel -->
+      <div id="plugins-panel-view" style="display:none">
+        <div id="pp-header">
+          <h2>Plugins</h2>
+          <p>Enable or disable plugins and configure their settings.</p>
+        </div>
+        <div id="pp-list"></div>
+      </div>
+
+      <!-- Root Gallery view -->
+      <div id="root-gallery-view" style="display:none">
+        <div id="rg-toolbar" class="rg-toolbar">
+          <div class="rg-toolbar-left">
+            <button class="g-btn" id="rg-select-all">Select All</button>
+            <button class="g-btn" id="rg-deselect">Deselect All</button>
+            <span class="g-count" id="rg-count">0 selected</span>
+          </div>
+          <div class="rg-toolbar-right">
+            <button class="g-btn g-btn-delete" id="rg-delete" disabled>Delete Selected</button>
+            <button class="g-btn g-btn-export" id="rg-export" disabled>Export Selected</button>
+            <button class="g-btn" id="rg-refresh">↻ Refresh</button>
+          </div>
+        </div>
+        <div id="rg-scroll">
+          <div id="rg-content"><div class="placeholder">Loading gallery…</div></div>
+        </div>
+      </div>
+
+      <!-- ─── Workflow view ─────────────────────────────────── -->
+      <div id="workflow-view" style="display:none">
+        <div id="wf-toolbar">
+          <div id="wf-toolbar-left">
+            <select id="wf-select"><option value="">— select workflow —</option></select>
+            <button id="wf-new"       class="g-btn">＋ New</button>
+            <button id="wf-save"      class="g-btn">Save</button>
+            <button id="wf-rename"    class="g-btn">Rename</button>
+            <button id="wf-delete-wf" class="g-btn g-btn-delete">Delete</button>
+          </div>
+          <div id="wf-toolbar-right">
+            <span id="wf-status"></span>
+            <button id="wf-tab-graph"   class="wf-tab active">Graph</button>
+            <button id="wf-tab-gallery" class="wf-tab">Gallery</button>
+          </div>
+        </div>
+        <!-- BaklavaJS mounts its full editor (palette + canvas) here -->
+        <div id="wf-canvas-wrap"></div>
+        <!-- Gallery of workflow run images -->
+        <div id="wf-gallery-view" style="display:none"></div>
+      </div>
+
+      <div id="empty-state">
+        <p>Select a plugin tab to get started.</p>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- ─── Plugin global settings modal ───────────────────────── -->
+  <div id="settings-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-box">
+      <div class="modal-header">
+        <h2 id="modal-title">Plugin Settings</h2>
+        <button class="modal-close" id="btn-modal-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <label class="toggle-row">
+          <span>Enabled</span>
+          <input type="checkbox" id="setting-enabled">
+        </label>
+        <hr>
+        <div id="global-settings-fields"></div>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-save-global" class="primary-btn">Save</button>
+        <button id="btn-cancel-global" class="ghost-btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Right-click context menu ───────────────────────────── -->
+  <div id="ctx-menu" class="ctx-menu hidden">
+    <div id="ctx-menu-items"></div>
+  </div>
+
+  <script type="module" src="/client/dist/app.js"></script>
+</body>
+</html>

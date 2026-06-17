@@ -1,0 +1,233 @@
+/* Shared styles imported by all plugin iframes */
+:root {
+  --bg:       #1a1a1e;
+  --surface:  #25252b;
+  --surface2: #2e2e36;
+  --border:   #3a3a45;
+  --accent:   #6c63ff;
+  --accent-h: #8a83ff;
+  --text:     #e4e4f0;
+  --text-dim: #888899;
+  --danger:   #e05c5c;
+  --radius:   8px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: system-ui, sans-serif;
+  font-size: 14px;
+  background: var(--bg);
+  color: var(--text);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ─── View tab switcher (Tool | Gallery) ─────────────────── */
+.view-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+.view-tab {
+  padding: 9px 18px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 13px;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color .15s, border-color .15s;
+}
+.view-tab.active  { color: var(--text); border-bottom-color: var(--accent); }
+.view-tab:hover:not(.active) { color: var(--text); }
+
+.view { display: none; flex: 1; flex-direction: column; overflow: hidden; min-height: 0; }
+.view.active { display: flex; }
+
+/* ─── Gallery component ───────────────────────────────────── */
+.gallery-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 9px 14px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.gallery-toolbar-left, .gallery-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.g-btn {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  transition: background .12s;
+}
+.g-btn:hover { background: var(--surface2); }
+.g-btn-export {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.g-btn-export:hover { background: var(--accent-h); border-color: var(--accent-h); }
+.g-btn-export:disabled { opacity: .4; cursor: not-allowed; }
+.g-btn-delete { color: var(--danger); border-color: var(--danger); }
+.g-btn-delete:hover { background: rgba(224,92,92,.12); }
+.g-btn-delete:disabled { opacity: .4; cursor: not-allowed; }
+
+.g-use-btn {
+  display: none;
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 3px 10px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  z-index: 2;
+}
+.g-card:hover .g-use-btn { display: block; }
+.g-use-btn:hover { background: var(--accent-h); }
+
+.g-ctx-menu {
+  position: fixed;
+  z-index: 9999;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 20px rgba(0,0,0,.45);
+  min-width: 130px;
+  overflow: hidden;
+}
+.g-ctx-item {
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.g-ctx-item:hover { background: var(--surface2); }
+.g-ctx-danger { color: var(--danger); }
+
+.g-count { font-size: 12px; color: var(--text-dim); min-width: 70px; }
+
+.gallery-grid {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 8px;
+  align-content: flex-start;
+}
+.gallery-grid::-webkit-scrollbar { width: 4px; }
+.gallery-grid::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.g-card {
+  position: relative;
+  background: var(--surface2);
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: border-color .12s;
+  user-select: none;
+}
+.g-card:has(.g-checkbox:checked),
+.g-card.selected { border-color: var(--accent); }
+.g-card:hover { border-color: var(--border); }
+
+.g-card img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  display: block;
+}
+
+.g-checkbox {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--accent);
+  z-index: 1;
+}
+
+.g-label {
+  padding: 4px 6px;
+  font-size: 10px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.g-empty {
+  grid-column: 1 / -1;
+  padding: 40px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.g-loading {
+  grid-column: 1 / -1;
+  padding: 30px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+/* ─── Settings bar (shared by tool views) ─────────────────── */
+.settings-bar {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  padding: 10px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+.setting-group { display: flex; flex-direction: column; gap: 4px; }
+.setting-group label { font-size: 11px; color: var(--text-dim); }
+.setting-group select,
+.setting-group input[type="text"],
+.setting-group input[type="number"] {
+  padding: 5px 8px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+}
+.setting-group select:focus,
+.setting-group input:focus { border-color: var(--accent); }
+
+.bar-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.bar-status { font-size: 11px; color: var(--text-dim); }
+
+.btn { padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; border: none; }
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary:hover { background: var(--accent-h); }
+.btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
+.btn-ghost:hover { background: var(--surface2); }

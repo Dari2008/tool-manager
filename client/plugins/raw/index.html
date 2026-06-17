@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Raw Images</title>
+  <link rel="stylesheet" href="/client/css/plugin-base.css">
+  <link rel="stylesheet" href="/client/plugins/raw/style.css">
+</head>
+<body>
+
+  <!-- Drop overlay (visible while dragging image files from OS) -->
+  <div id="drop-overlay">
+    <div class="drop-hint-box">Drop images to upload</div>
+  </div>
+
+  <!-- Toolbar -->
+  <div class="gallery-toolbar">
+    <div class="gallery-toolbar-left">
+      <button class="g-btn" id="g-select-all">Select All</button>
+      <button class="g-btn" id="g-deselect">Deselect</button>
+      <span class="g-count" id="g-count">0 selected</span>
+    </div>
+    <div class="gallery-toolbar-right">
+      <button class="g-btn g-btn-delete" id="g-delete" disabled>Delete Selected</button>
+      <button class="g-btn g-btn-export" id="g-export" disabled>Export Selected</button>
+      <label class="g-btn upload-label">
+        + Upload
+        <input type="file" id="file-input" accept="image/*" multiple>
+      </label>
+      <button class="g-btn" id="g-refresh">↻</button>
+    </div>
+  </div>
+
+  <!-- Gallery grid -->
+  <div class="gallery-grid" id="g-grid">
+    <div class="g-loading">Loading…</div>
+  </div>
+
+  <script type="module">
+    const FOLDER    = 'raw';
+    const grid      = document.getElementById('g-grid');
+    const countEl   = document.getElementById('g-count');
+    const exportBtn = document.getElementById('g-export');
+
+    let items    = [];
+    let selected = new Set();
+
+    // ─── Gallery ──────────────────────────────────────────────
+    async function refresh() {
+      grid.innerHTML = '<div class="g-loading">Loading…</div>';
+      selected.clear();
+      updateCount();
+      try {
+        const res = await fetch(`/api/gallery/get?folder=${FOLDER}`);
+        items = await res.json();
+        renderItems();
+      } catch {
+        grid.innerHTML = '<div class="g-empty">Failed to load.</div>';
+      }
+    }
+
+    function renderItems() {
+      grid.innerHTML = '';
+      if (!items.length) {
+        grid.innerHTML = '<div class="g-empty">No raw images yet. Upload some to get started.</div>';
+        return;
+      }
+      for (const item of items) {
+        const card = document.createElement('div');
+        card.className = 'g-card';
+
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'g-checkbox';
+        cb.addEventListener('change', () => {
+          if (cb.checked) selected.add(item.uuid);
+          else selected.delete(item.uuid);
+          card.classList.toggle('selected', cb.checked);
+          updateCount();
+        });
+
+        const img = document.createElement('img');
+        img.src     = item.thumbnail ?? item.url;
+        img.alt     = item.filename ?? item.uuid;
+        img.loading = 'lazy';
+        img.addEventListener('click', () => { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); });
+
+        const lbl = document.createElement('div');
+        lbl.className = 'g-label';
+        lbl.textContent = item.filename ?? item.uuid.slice(0, 8);
+
+        card.append(cb, img, lbl);
+        card.addEventListener('contextmenu', e => {
+          e.preventDefault();
+          showCardCtxMenu(e.clientX, e.clientY, item);
+        });
+        grid.appendChild(card);
+      }
+    }
+
+    function updateCount() {
+      const n = selected.size;
+      countEl.textContent = `${n} selected`;
+      document.getElementById('g-delete').disabled = n === 0;
+      exportBtn.disabled  = n === 0;
+    }
+
+    // Build delete modal plan for one or more raw UUIDs, show modal, execute,
+    // and return the set of raw UUIDs whose deletion was confirmed.
+    async function deleteRawWithModal(uuids) {
+      const { showDeleteModal } = await import('/client/dist/delete-modal.js');
+
+      const [allJobs, allSettings] = await Promise.all([
+        fetch('/api/jobs').then(r => r.json()).catch(() => []),
+        fetch('/api/settings/shopProductImage').then(r => r.json()).catch(() => []),
+      ]);
+
+      // Full set of raw URLs being deleted in this batch
+      const deletingUrls = new Set(uuids.map(uuid => `/api/images/raw/${uuid}`));
+
+      const planItems   = new Map(); // id → plan item
+      const jobOutSeen  = new Map(); // jobId → Set of output IDs discovered via settings
+
+      // Raw images being deleted
+      for (const uuid of uuids) {
+        const rawItem = items.find(i => i.uuid === uuid);
+        planItems.set(`raw:${uuid}`, {
+          id: `raw:${uuid}`,
+          type: 'Raw Image',
+          label: rawItem?.filename ?? uuid.slice(0, 8),
+          imageUrl: rawItem?.url,
+          checked: true,
+          onDelete: () => fetch(`/api/images/${FOLDER}/${uuid}`, { method: 'DELETE' }).catch(() => {}),
+        });
+      }
+
+      // Find outputs directly: any settings entry whose activeUrl points to a deleting raw image
+      for (const s of allSettings) {
+        const rawUrl = s.settings?.activeUrl ?? s.settings?.rawImage;
+        if (!rawUrl || !deletingUrls.has(rawUrl)) continue;
+
+        const outId = `output:${s.id}`;
+        if (!planItems.has(outId)) {
+          planItems.set(outId, {
+            id: outId,
+            type: 'Output Image',
+            label: s.id.slice(0, 8),
+            imageUrl: `/api/images/shopProductImage/${s.id}`,
+            checked: true,
+            onDelete: () => fetch(`/api/settings/shopProductImage/${s.id}`, { method: 'DELETE' }).catch(() => {}),
+          });
+        }
+
+        const jobId = s.settings?.jobId;
+        if (jobId) {
+          if (!jobOutSeen.has(jobId)) jobOutSeen.set(jobId, new Set());
+          jobOutSeen.get(jobId).add(s.id);
+        }
+      }
+
+      // Jobs whose every rawImage entry falls within the deletion batch
+      const orphaned = allJobs.filter(j => {
+        const imgs = Array.isArray(j.rawImage) ? j.rawImage : [];
+        return imgs.length > 0 && imgs.every(u => deletingUrls.has(u));
+      });
+
+      for (const job of orphaned) {
+        const jobId     = job.id;
+        const rawCount  = Array.isArray(job.rawImage) ? job.rawImage.length : 0;
+        const jobOutputs = Array.isArray(job.outputs) ? job.outputs : [];
+
+        // Add all outputs from job.outputs — covers jobs where settings files
+        // weren't found via activeUrl (e.g. legacy subfolder or not yet generated)
+        for (const outputId of jobOutputs) {
+          const outId = `output:${outputId}`;
+          if (!planItems.has(outId)) {
+            planItems.set(outId, {
+              id: outId,
+              type: 'Output Image',
+              label: outputId.slice(0, 8),
+              imageUrl: `/api/images/shopProductImage/${outputId}`,
+              checked: true,
+              onDelete: () => fetch(`/api/settings/shopProductImage/${outputId}`, { method: 'DELETE' }).catch(() => {}),
+            });
+          }
+          if (!jobOutSeen.has(jobId)) jobOutSeen.set(jobId, new Set());
+          jobOutSeen.get(jobId).add(outputId);
+        }
+
+        // Auto-check the job when all of its known outputs are being deleted
+        const seenOutputs = jobOutSeen.get(jobId) ?? new Set();
+        const allCovered  = jobOutputs.length === 0 || jobOutputs.every(id => seenOutputs.has(id));
+
+        const jobKey = `job:${jobId}`;
+        if (!planItems.has(jobKey)) {
+          planItems.set(jobKey, {
+            id: jobKey,
+            type: 'Job',
+            label: `Job ${jobId.slice(0, 8)}`,
+            meta: rawCount > 0 ? `rawImage (${rawCount} image${rawCount !== 1 ? 's' : ''})` : undefined,
+            checked: allCovered,
+            onDelete: () => fetch(`/api/jobs/${jobId}`, { method: 'DELETE' }).catch(() => {}),
+          });
+        }
+      }
+
+      const n = uuids.length;
+      const deletedIds = await showDeleteModal({
+        title: n === 1 ? 'Delete Raw Image' : `Delete ${n} Raw Images`,
+        items: [...planItems.values()],
+      });
+
+      return new Set(
+        deletedIds.filter(id => id.startsWith('raw:')).map(id => id.slice('raw:'.length))
+      );
+    }
+
+    async function deleteSelected() {
+      if (!selected.size) return;
+      const btn = document.getElementById('g-delete');
+      btn.textContent = 'Deleting…';
+      btn.disabled = true;
+
+      const deletedUuids = await deleteRawWithModal([...selected]);
+
+      if (deletedUuids.size) {
+        items = items.filter(i => !deletedUuids.has(i.uuid));
+        for (const uuid of deletedUuids) selected.delete(uuid);
+        renderItems();
+        updateCount();
+        window.parent.postMessage({ type: 'gallery-changed' }, '*');
+      }
+
+      btn.textContent = 'Delete Selected';
+      btn.disabled = selected.size === 0;
+    }
+
+    // ─── Right-click context menu ─────────────────────────────
+    const ctxMenu = document.createElement('div');
+    ctxMenu.style.cssText = 'display:none;position:fixed;z-index:9999;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:0 4px 20px rgba(0,0,0,.45);min-width:130px;overflow:hidden;';
+    document.body.appendChild(ctxMenu);
+
+    function showCardCtxMenu(x, y, item) {
+      ctxMenu.innerHTML = '';
+      const del = document.createElement('div');
+      del.textContent = 'Delete';
+      del.style.cssText = 'padding:8px 14px;font-size:13px;cursor:pointer;color:var(--danger);';
+      del.addEventListener('mouseenter', () => { del.style.background = 'var(--surface2)'; });
+      del.addEventListener('mouseleave', () => { del.style.background = ''; });
+      del.addEventListener('click', async () => {
+        ctxMenu.style.display = 'none';
+        const deletedUuids = await deleteRawWithModal([item.uuid]);
+        if (deletedUuids.has(item.uuid)) {
+          items = items.filter(i => i.uuid !== item.uuid);
+          selected.delete(item.uuid);
+          renderItems();
+          updateCount();
+          window.parent.postMessage({ type: 'gallery-changed' }, '*');
+        }
+      });
+      ctxMenu.appendChild(del);
+      ctxMenu.style.display = 'block';
+      const mw = ctxMenu.offsetWidth, mh = ctxMenu.offsetHeight;
+      ctxMenu.style.left = `${Math.min(x, window.innerWidth - mw - 8)}px`;
+      ctxMenu.style.top  = `${Math.min(y, window.innerHeight - mh - 8)}px`;
+    }
+    document.addEventListener('click', () => { ctxMenu.style.display = 'none'; });
+
+    window.addEventListener('message', e => {
+      if (e.data?.type === 'refresh-gallery') refresh();
+    });
+
+    // ─── Export ───────────────────────────────────────────────
+    async function exportSelected() {
+      if (!selected.size) return;
+      const toExport = items.filter(i => selected.has(i.uuid));
+      const orig = exportBtn.textContent;
+      exportBtn.textContent = 'Preparing…';
+      exportBtn.disabled = true;
+      try {
+        const { default: JSZip } = await import(
+          'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js'
+        );
+        const zip = new JSZip();
+        await Promise.all(toExport.map(async item => {
+          const r = await fetch(item.url);
+          if (!r.ok) return;
+          zip.file(item.filename ?? `${item.uuid}.jpg`, await r.blob());
+        }));
+        const blob = await zip.generateAsync({ type: 'blob' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'raw-export.zip'; a.click();
+        URL.revokeObjectURL(url);
+      } finally {
+        exportBtn.textContent = orig;
+        updateCount();
+      }
+    }
+
+    // ─── Upload ───────────────────────────────────────────────
+    async function uploadFiles(files) {
+      for (const file of files) {
+        const fd = new FormData();
+        fd.append('image', file);
+        await fetch('/api/raw/upload', { method: 'POST', body: fd });
+      }
+      await refresh();
+    }
+
+    // ─── Wiring ───────────────────────────────────────────────
+    document.getElementById('g-select-all').addEventListener('click', () => {
+      grid.querySelectorAll('.g-checkbox').forEach(cb => {
+        if (!cb.checked) { cb.checked = true; cb.dispatchEvent(new Event('change')); }
+      });
+    });
+    document.getElementById('g-deselect').addEventListener('click', () => {
+      grid.querySelectorAll('.g-checkbox').forEach(cb => {
+        if (cb.checked) { cb.checked = false; cb.dispatchEvent(new Event('change')); }
+      });
+    });
+    document.getElementById('g-delete').addEventListener('click', deleteSelected);
+    exportBtn.addEventListener('click', exportSelected);
+    document.getElementById('g-refresh').addEventListener('click', refresh);
+    document.getElementById('file-input').addEventListener('change', e => {
+      if (e.target.files.length) uploadFiles(Array.from(e.target.files));
+      e.target.value = '';
+    });
+
+    // ─── Drag-and-drop upload from OS ────────────────────────
+    const dropOverlay = document.getElementById('drop-overlay');
+
+    document.addEventListener('dragenter', e => {
+      if ([...e.dataTransfer.types].includes('Files')) {
+        e.preventDefault();
+        dropOverlay.classList.add('active');
+      }
+    });
+    document.addEventListener('dragover', e => {
+      if ([...e.dataTransfer.types].includes('Files')) e.preventDefault();
+    });
+    document.addEventListener('dragleave', e => {
+      if (!e.relatedTarget) dropOverlay.classList.remove('active');
+    });
+    document.addEventListener('drop', e => {
+      e.preventDefault();
+      dropOverlay.classList.remove('active');
+      const files = [...e.dataTransfer.files].filter(f => f.type.startsWith('image/'));
+      if (files.length) uploadFiles(files);
+    });
+
+    // Gallery-only plugin signals ready so parent can finish init
+    window.parent.postMessage({ type: 'ready' }, '*');
+    refresh();
+  </script>
+
+</body>
+</html>

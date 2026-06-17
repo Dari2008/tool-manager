@@ -1,0 +1,34 @@
+/* Raw plugin — only plugin-specific overrides; base styles in plugin-base.css */
+
+.upload-label {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+}
+.upload-label input[type="file"] { display: none; }
+
+/* OS drag-and-drop upload overlay */
+#drop-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(108, 99, 255, 0.12);
+  border: 3px dashed var(--accent);
+  z-index: 100;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+#drop-overlay.active { display: flex; }
+
+.drop-hint-box {
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 20px 36px;
+  font-size: 15px;
+  color: var(--accent);
+  font-weight: 500;
+  box-shadow: var(--shadow);
+}
